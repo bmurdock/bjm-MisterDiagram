@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod tests {
     use misterdiagram_opc::{MAX_PART, PackageOut, RelsOut};
+    use std::io::{Cursor, Write};
     use std::path::PathBuf;
     use std::process::Command;
     fn package(kind: &str) -> Vec<u8> {
@@ -39,6 +40,54 @@ mod tests {
             assert!(s.contains("visio/document.xml\tapplication/vnd.ms-visio."));
             assert!(s.contains("relationship\trId1\tdocument\tvisio/document.xml"));
         }
+    }
+    #[test]
+    fn info_escapes_package_name_controls_without_changing_tsv_columns() {
+        let mut p = PackageOut::default();
+        p.xml_part(
+            "visio/document.xml",
+            "application/vnd.ms-visio.drawing.main+xml",
+            b"<VisioDocument xmlns=\"http://schemas.microsoft.com/office/visio/2012/main\"/>".to_vec(),
+        );
+        p.binary("notes/alert\u{1b}[31m\nnext\tfield.bin", "application/octet-stream", vec![1]);
+        let mut r = RelsOut::default();
+        r.add("http://schemas.microsoft.com/visio/2010/relationships/document", "visio/document.xml", false);
+        p.rels("", &r);
+
+        let output = invoke(&p.finish().unwrap(), "vsdx");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(!text.contains('\u{1b}'));
+        assert!(text.contains("notes/alert\\u{1b}[31m\\nnext\\tfield.bin\tapplication/octet-stream\t1"));
+        assert!(text.lines().all(|line| line.split('\t').count() == 3 || line.starts_with("relationship\t")));
+    }
+    #[test]
+    fn info_rejects_oversized_compressed_file_before_reading_it() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/info-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("sparse-{}.vsdx", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_PART + 1).unwrap();
+        drop(file);
+
+        let output = Command::new(env!("CARGO_BIN_EXE_misterdiagram")).args(["info"]).arg(&path).output().unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8(output.stderr).unwrap().contains("compressed package exceeds size cap"));
+    }
+    #[test]
+    fn info_escapes_package_name_in_errors() {
+        let mut archive = zip::ZipWriter::new_append(Cursor::new(package("application/vnd.ms-visio.drawing.main+xml"))).unwrap();
+        archive.start_file("alert\u{1b}[31m\nnext.bin", zip::write::SimpleFileOptions::default()).unwrap();
+        archive.write_all(b"x").unwrap();
+        let bytes = archive.finish().unwrap().into_inner();
+
+        let output = invoke(&bytes, "vsdx");
+        assert!(!output.status.success());
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(!error.contains('\u{1b}'));
+        assert_eq!(error.lines().count(), 1);
+        assert!(error.contains("alert\\u{1b}[31m\\nnext.bin"));
     }
     #[test]
     fn shipped_2011_core_namespace_is_supported() {
