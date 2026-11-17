@@ -63,6 +63,7 @@ fn craft_fonts(dir: &std::path::Path) -> Result<String, String> {
 fn manifest(dir: &std::path::Path, manifest: &std::path::Path) -> Result<String, String> {
     watch_optional(manifest);
     let text = std::fs::read_to_string(manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
+    let root = dir.canonicalize().map_err(|e| format!("CRAFT_FONTS_DIR {}: {e}", dir.display()))?;
     let wasm = std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|a| a == "wasm32");
     let mut out = String::new();
     for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
@@ -78,6 +79,9 @@ fn manifest(dir: &std::path::Path, manifest: &std::path::Path) -> Result<String,
             continue;
         }
         let path = dir.join(file).canonicalize().map_err(|e| format!("{file}: {e}"))?;
+        if !path.starts_with(&root) {
+            return Err(format!("{file}: outside CRAFT_FONTS_DIR"));
+        }
         println!("cargo::rerun-if-changed={}", path.display());
         let scripts: Vec<String> = scripts.split(',').map(|s| format!("{:?}", s.trim())).collect();
         let _ = writeln!(
