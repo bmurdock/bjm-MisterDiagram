@@ -136,19 +136,6 @@ pub(crate) fn background(s: &mut Session, p: &Value) -> Result<Value> {
     if background == Some(index) {
         return Err(operation("page cannot be its own background"));
     }
-    if let Some(background) = background {
-        let source = s.document.pages.get(index).ok_or_else(|| operation("page not found"))?.id;
-        let mut current = s.document.pages.get(background).ok_or_else(|| operation("background not found"))?;
-        let mut seen = std::collections::BTreeSet::new();
-        loop {
-            if current.id == source || !seen.insert(current.id) || seen.len() > 128 {
-                return Err(operation("background cycle or depth limit"));
-            }
-            let Some(next) = current.attributes.get("BackPage") else { break };
-            let id = next.parse::<u32>().map_err(operation)?;
-            current = s.document.pages.iter().find(|p| p.id == id).ok_or_else(|| operation("background page not found"))?;
-        }
-    }
     s.edit_document(|doc, _| {
         let target = if let Some(i) = background {
             let page = page_mut(doc, i)?;
@@ -163,6 +150,7 @@ pub(crate) fn background(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             page.attributes.remove("BackPage");
         }
+        doc.validate_backgrounds().map_err(operation)?;
         Ok(json!({}))
     })
 }
@@ -259,21 +247,51 @@ pub(crate) fn layer_assign(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(json!({}))
     })
 }
+fn remap_membership(membership: &str, id: u32) -> Result<Option<String>> {
+    let mut changed = false;
+    let mut ids = Vec::new();
+    for token in membership.split(';').filter(|s| !s.is_empty()) {
+        let value = token.parse::<u32>().map_err(operation)?;
+        changed |= value >= id;
+        if value != id {
+            ids.push(if value > id { value - 1 } else { value }.to_string());
+        }
+    }
+    Ok(changed.then(|| ids.join(";")))
+}
+
 fn remove_membership(shapes: &mut [Shape], id: u32, depth: usize) -> Result<()> {
     if depth > 128 {
         return Err(operation("shape nesting limit"));
     }
     for shape in shapes {
-        if let Some(cell) = shape.sheet.cells.iter_mut().find(|c| c.name == "LayerMember") {
-            let mut ids = Vec::new();
-            for token in cell.value.as_deref().unwrap_or("").split(';').filter(|s| !s.is_empty()) {
-                let value = token.parse::<u32>().map_err(operation)?;
-                if value != id {
-                    ids.push(if value > id { value - 1 } else { value }.to_string());
+        if let Some(cell) = shape.sheet.cells.iter_mut().find(|c| c.name.eq_ignore_ascii_case("LayerMember")) {
+            match cell.formula.as_deref() {
+                None | Some("No Formula") => {
+                    if let Some(value) = remap_membership(cell.value.as_deref().unwrap_or(""), id)? {
+                        cell.value = Some(value);
+                    }
+                }
+                Some(formula) => {
+                    use misterdiagram_sheet::Expr;
+                    let (membership, numeric) = match misterdiagram_sheet::parse(formula) {
+                        Ok(Expr::Text(text)) => (text, false),
+                        Ok(Expr::Number(number, None)) if (0. ..=f64::from(u32::MAX)).contains(&number) && number.fract() == 0. => {
+                            (number.to_string(), true)
+                        }
+                        _ => {
+                            return Err(operation(format!(
+                                "cannot delete layer: LayerMember formula on shape {} cannot be safely remapped",
+                                shape.id
+                            )));
+                        }
+                    };
+                    if let Some(value) = remap_membership(&membership, id)? {
+                        cell.formula = Some(if numeric && !value.is_empty() { value.clone() } else { format!("\"{value}\"") });
+                        cell.value = Some(value);
+                    }
                 }
             }
-            cell.value = Some(ids.join(";"));
-            cell.formula = None;
         }
         remove_membership(&mut shape.shapes, id, depth + 1)?;
     }
@@ -293,9 +311,11 @@ pub(crate) fn layer_delete(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| operation("layer not found"))?;
         sec.rows.remove(position);
         for (i, row) in sec.rows.iter_mut().enumerate() {
-            let old = row.index.unwrap_or(u32::try_from(i).map_err(operation)?);
-            if old > id {
-                row.index = Some(old - 1);
+            let old_position = i + usize::from(i >= position);
+            let old = row.index.unwrap_or(u32::try_from(old_position).map_err(operation)?);
+            let new = if old > id { old - 1 } else { old };
+            if row.index.is_some() || usize::try_from(new).map_err(operation)? != i {
+                row.index = Some(new);
             }
         }
         remove_membership(&mut page_mut(doc, index)?.shapes, id, 0)?;

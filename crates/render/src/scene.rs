@@ -696,7 +696,7 @@ fn page_evaluated_prepared(
     let mut pages = vec![];
     let mut current = p;
     loop {
-        if pages.contains(&current.id) || pages.len() >= 128 {
+        if pages.contains(&current.id) || pages.len() >= misterdiagram_model::MAX_BACKGROUND_PAGES {
             return Err("background page cycle or depth limit".into());
         }
         pages.push(current.id);
