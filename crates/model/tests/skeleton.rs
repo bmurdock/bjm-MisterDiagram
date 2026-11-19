@@ -66,13 +66,11 @@ fn observed_cells(sheet: &misterdiagram_opc::xml::El) -> Values {
     fn visit(e: &misterdiagram_opc::xml::El, path: &str, out: &mut Values) {
         for child in e.elements() {
             match child.local() {
-                "Cell" => {
-                    if !matches!(child.attr("N"), Some("Copyright" | "HelpTopic")) {
-                        out.insert(
-                            format!("{path}/{}", child.attr("N").unwrap()),
-                            (child.attr("V").map(str::to_owned), child.attr("F").map(str::to_owned), child.attr("U").map(str::to_owned)),
-                        );
-                    }
+                "Cell" if !matches!(child.attr("N"), Some("Copyright" | "HelpTopic")) => {
+                    out.insert(
+                        format!("{path}/{}", child.attr("N").unwrap()),
+                        (child.attr("V").map(str::to_owned), child.attr("F").map(str::to_owned), child.attr("U").map(str::to_owned)),
+                    );
                 }
                 "Section" | "Row" => visit(child, &format!("{path}/{}/{}", child.attr("N").unwrap_or(""), child.attr("IX").unwrap_or("")), out),
                 _ => {}

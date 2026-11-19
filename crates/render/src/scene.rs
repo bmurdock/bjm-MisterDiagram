@@ -1836,7 +1836,7 @@ fn dash_elements(path: &BezPath, stroke: &kurbo::Stroke) -> Result<usize, String
     }
     let period: f64 = stroke.dash_pattern.iter().sum();
     let elements = (length / period + moves as f64 + 1.).ceil() * stroke.dash_pattern.len() as f64 * 32.;
-    if !elements.is_finite() || elements < 0. || elements > 4_000_000. {
+    if !(0. ..=4_000_000.).contains(&elements) {
         return Err("scene path limit (dash expansion)".into());
     }
     Ok(elements as usize)

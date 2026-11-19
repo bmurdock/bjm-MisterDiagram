@@ -314,7 +314,7 @@ pub(crate) fn rows(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut gutter = |key: &str, block: &str, line: &str| -> Result<f64> {
         let v = if p.get(key).is_some() { crate::edit::number(p, key)? } else { number(&mut e, ps, block)?.max(2. * number(&mut e, ps, line)?) };
-        if v < 0. || v > 1e6 { Err(operation("invalid gutter")) } else { Ok(grid(v)) }
+        if (0. ..=1e6).contains(&v) { Ok(grid(v)) } else { Err(operation("invalid gutter")) }
     };
     let gx = gutter("gutter_x", "BlockSizeX", "LineToNodeX")?;
     let gy = gutter("gutter_y", "BlockSizeY", "LineToNodeY")?;
