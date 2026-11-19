@@ -152,6 +152,7 @@ pub(crate) fn save(s: &mut Session, p: &Value) -> Result<Value> {
         "vstx" => SaveKind::Template,
         _ => return Err(operation("save extension must be vsdx, vssx or vstx")),
     };
+    let stencil_projection = kind.projects_stencil(&s.document);
     let theme = misterdiagram_theme::Themes::from_document(&s.document).map_err(operation)?;
     let mut written = misterdiagram_vsdx::write_as_with_hosts(&s.document, kind, Some(&theme), Some(&misterdiagram_text::Host)).map_err(operation)?;
     for ((page, id), limit) in &s.route_warnings {
@@ -167,8 +168,15 @@ pub(crate) fn save(s: &mut Session, p: &Value) -> Result<Value> {
     let saved_generation = s.save_generation.checked_add(1).ok_or_else(|| operation("save generation limit"))?;
     atomic_write(&absolute, &written.bytes)?;
     s.save_generation = saved_generation;
-    s.saved_revision = Some(s.revision);
-    s.path = Some(absolute.canonicalize().unwrap_or(absolute));
+    let saved_path = absolute.canonicalize().unwrap_or(absolute);
+    if !stencil_projection {
+        s.saved_revision = Some(s.revision);
+        s.path = Some(saved_path);
+    } else if s.path.as_ref() == Some(&saved_path) {
+        // An opened drawing may already have a .vssx filename. Its previous
+        // revision is no longer backed by that file if we replace it in place.
+        s.saved_revision = None;
+    }
     Ok(json!({"bytes":written.bytes.len(),"warnings":written.warnings,"warning_count":written.warning_count}))
 }
 /// Export a page through the established renderer. PDF without a page includes

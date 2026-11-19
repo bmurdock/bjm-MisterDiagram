@@ -391,7 +391,10 @@ batch as a separate operation.
 
 `file.new` and `open`/`file.open` refuse to replace a document with unsaved edits.
 The error tells callers to pass `discard: true` when replacement is intentional.
-A fresh session is clean; save marks the current revision clean. Undo and redo
+A fresh session is clean. Saving a complete document marks its revision clean.
+Saving a drawing as a `.vssx` stencil copy leaves its drawing path and unsaved
+status intact. If the copy replaces the open drawing itself, the drawing is
+marked unsaved. Undo and redo
 track the saved revision, and inspection, previews and external stencil loading
 do not mark the drawing dirty. The guard state lives only in the session and is
 never written into the document.

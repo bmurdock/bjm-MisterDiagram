@@ -9,6 +9,44 @@ fn out(name: &str) -> std::path::PathBuf {
     p
 }
 #[test]
+fn writing_a_stencil_copy_keeps_the_drawing_path_and_discard_guard() {
+    let mut session = Session::new();
+    let drawing = out("stencil-source.vsdx");
+    let stencil = out("stencil-copy.vssx");
+    run(&mut session, "file.save", json!({"path":drawing}));
+    run(&mut session, "shape.draw.rect", json!({"x":1,"y":1,"width":2,"height":1}));
+    run(&mut session, "file.save", json!({"path":stencil}));
+
+    assert!(misterdiagram_vsdx::read(&stencil).unwrap().pages[0].shapes.is_empty());
+    assert_eq!(session.document().pages[0].shapes.len(), 1);
+    assert!(session.has_unsaved_changes());
+    assert!(session.execute("file.new", &json!({})).unwrap_err().to_string().contains("discard"));
+    assert!(session.execute("file.open", &json!({"path":stencil})).is_err());
+    assert_eq!(run(&mut session, "stencil.list", json!({}))["stencils"][0]["path"], json!(drawing.canonicalize().unwrap()));
+
+    run(&mut session, "file.open", json!({"path":stencil,"discard":true}));
+    run(&mut session, "page.rename", json!({"page":1,"name":"Stencil properties"}));
+    let native_save = out("native-stencil-save.vssx");
+    run(&mut session, "file.save", json!({"path":native_save}));
+    assert!(!session.has_unsaved_changes());
+    assert_eq!(misterdiagram_vsdx::read(&native_save).unwrap().pages[0].name, "Stencil properties");
+}
+
+#[test]
+fn projecting_over_an_open_drawing_with_a_stencil_extension_invalidates_its_save() {
+    let mut session = Session::new();
+    let drawing = out("misnamed-drawing.vssx");
+    let mut doc = misterdiagram_model::skeleton::document(false);
+    doc.pages[0].shapes.push(misterdiagram_model::skeleton::rectangle(1, 1., 1., 2., 1., "Drawing shape").unwrap());
+    std::fs::write(&drawing, misterdiagram_vsdx::write(&doc).unwrap().bytes).unwrap();
+    run(&mut session, "file.open", json!({"path":drawing}));
+    assert!(!session.has_unsaved_changes());
+    run(&mut session, "file.save", json!({"path":drawing}));
+    assert!(session.has_unsaved_changes());
+    assert!(session.execute("file.new", &json!({})).is_err());
+}
+
+#[test]
 fn failed_save_and_failed_discard_preserve_dirty_revision() {
     let mut s = Session::new();
     run(&mut s, "shape.draw.rect", json!({"x":1,"y":1,"width":2,"height":1}));

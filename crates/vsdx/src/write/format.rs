@@ -15,6 +15,21 @@ impl SaveKind {
             Self::Template => "application/vnd.ms-visio.template.main+xml",
         }
     }
+
+    /// Whether this output drops drawing pages from the active document.
+    pub fn projects_stencil(self, doc: &Document) -> bool {
+        if self != Self::Stencil {
+            return false;
+        }
+        let native_stencil = doc
+            .parts
+            .get(&doc.main_part)
+            .and_then(|part| part.content_type.as_deref())
+            .is_some_and(|kind| kind == self.content_type() || kind == "application/vnd.ms-visio.stencil.macroEnabled.main+xml");
+        !native_stencil
+            || !matches!(doc.pages.as_slice(), [page] if sheet_only(doc, page)
+                && !page.attributes.contains_key("BackPage") && !page.attributes.contains_key("Background"))
+    }
 }
 /// Save a document as a drawing, its document stencil, or a reusable drawing template.
 /// The caller's document is unchanged. Stencils retain a PageSheet-only metadata entry,
