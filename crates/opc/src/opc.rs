@@ -1,7 +1,7 @@
 //! Open Packaging Conventions: the zip container, part names, relationships and content types.
 
 use std::collections::HashMap;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read, Seek, Write};
 
 use crate::OpcError;
 use crate::xml::{self, A, W};
@@ -86,10 +86,16 @@ pub fn container_error(head: &[u8]) -> Option<String> {
 
 impl Package {
     pub fn open(bytes: &[u8]) -> Result<Self, OpcError> {
-        let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| match container_error(&bytes[..bytes.len().min(CONTAINER_HEAD)]) {
+        let zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| match container_error(&bytes[..bytes.len().min(CONTAINER_HEAD)]) {
             Some(message) => OpcError::NotPackage(message),
             None => zip_error("ZIP directory", e),
         })?;
+        Self::from_archive(zip, MAX_TOTAL)
+    }
+
+    /// Decompress an already opened archive within a caller's reservation and the fixed OPC limits.
+    pub fn from_archive(mut zip: zip::ZipArchive<impl Read + Seek>, reserved_bytes: u64) -> Result<Self, OpcError> {
+        let max_total = MAX_TOTAL.min(reserved_bytes);
         if zip.len() > MAX_ENTRIES {
             return Err(OpcError::InvalidPackage(format!("too many entries ({})", zip.len())));
         }
@@ -105,19 +111,16 @@ impl Package {
             if declared > MAX_PART {
                 return Err(OpcError::InvalidPackage(format!("oversized part {name} ({declared} bytes)")));
             }
-            if declared > MAX_TOTAL.saturating_sub(total) {
+            if declared > max_total.saturating_sub(total) {
                 return Err(OpcError::InvalidPackage("total size cap exceeded".into()));
             }
             let mut data = Vec::with_capacity(declared.min(16 * 1024 * 1024) as usize);
-            let cap = MAX_PART.min(MAX_TOTAL.saturating_sub(total));
-            match (&mut f).take(cap.saturating_add(1)).read_to_end(&mut data) {
-                Ok(_) if data.len() as u64 > cap => {
-                    return Err(OpcError::InvalidPackage(format!("part {name} exceeds size limits")));
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(OpcError::InvalidPackage(format!("cannot read ZIP part {name}: {e}")));
-                }
+            let read_error = |e| OpcError::InvalidPackage(format!("cannot read ZIP part {name}: {e}"));
+            (&mut f).take(declared).read_to_end(&mut data).map_err(read_error)?;
+            // Read through EOF for CRC validation, without retaining a byte
+            // beyond the entry's share of the reservation.
+            if f.read(&mut [0]).map_err(read_error)? != 0 || data.len() as u64 != declared {
+                return Err(OpcError::InvalidPackage(format!("part {name} does not match its declared size")));
             }
             total = total.saturating_add(data.len() as u64);
             if parts.insert(name.to_ascii_lowercase(), (name, std::sync::Arc::new(data))).is_some() {
@@ -508,6 +511,23 @@ impl PackageOut {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opened_archive_decompression_respects_its_aggregate_reservation() {
+        let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for name in ["first.bin", "second.bin"] {
+            let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            archive.start_file(name, options).unwrap();
+            archive.write_all(&[1; 1024]).unwrap();
+        }
+        let mut source = archive.finish().unwrap();
+        source.set_position(0);
+        let zip = zip::ZipArchive::new(source).unwrap();
+        let Err(error) = Package::from_archive(zip.clone(), 2047) else { panic!("reservation was exceeded") };
+        assert!(error.to_string().contains("total size cap exceeded"));
+        let package = Package::from_archive(zip, 2048).unwrap();
+        assert_eq!(package.get("second.bin").unwrap(), &[1; 1024]);
+    }
 
     #[test]
     fn damaged_zip_keeps_archive_context_and_underlying_io_cause() {

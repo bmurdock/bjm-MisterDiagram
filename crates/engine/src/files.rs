@@ -253,9 +253,24 @@ impl Drop for Temporary {
         let _ = std::fs::remove_file(&self.0);
     }
 }
+fn create_temporary(path: &Path, replacing: bool) -> std::io::Result<std::fs::File> {
+    let mut open = std::fs::OpenOptions::new();
+    open.write(true).create_new(true);
+    // A replacement can be more private than the process's default creation mode.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        open.mode(if replacing { 0o600 } else { 0o666 });
+    }
+    #[cfg(not(unix))]
+    let _ = replacing;
+    open.open(path)
+}
 /// Publish fully encoded bytes through a sibling temporary file, sync and rename.
-/// Existing destination permissions are preserved; new files use the process's normal
-/// creation permissions. A destination symlink is replaced, leaving its target untouched.
+/// On Unix, replacement temporaries start owner-only. The replacement copies the
+/// destination's Unix mode bits or Windows read-only attribute. ACLs follow the
+/// filesystem's creation rules. New files use the process's normal creation mode.
+/// A destination symlink is replaced, leaving its target untouched.
 /// A failure before rename leaves the destination intact and removes the temporary file.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -271,9 +286,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     for _ in 0..16 {
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temp = parent.join(format!(".misterdiagram-{}-{n}.tmp", std::process::id()));
-        let mut open = std::fs::OpenOptions::new();
-        open.write(true).create_new(true);
-        let mut file = match open.open(&temp) {
+        let mut file = match create_temporary(&temp, permissions.is_some()) {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(operation(e)),
@@ -289,4 +302,25 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         return Ok(());
     }
     Err(operation("could not reserve an output temporary file"))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn replacement_temporary_is_private_from_creation_and_published_mode_is_preserved() {
+        let root = std::env::temp_dir().join(format!("misterdiagram-output-permissions-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("drawing.vsdx");
+        let file = create_temporary(&path, true).unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o077, 0);
+        file.set_permissions(std::fs::Permissions::from_mode(0o640)).unwrap();
+        drop(file);
+        atomic_write(&path, b"replacement").unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

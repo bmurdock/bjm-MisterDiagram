@@ -81,7 +81,8 @@ impl ReadPackage {
         Ok(())
     }
 }
-const MAX_FILE: u64 = 512 * 1024 * 1024;
+/// Maximum compressed size of a Visio file.
+pub const MAX_FILE: u64 = 512 * 1024 * 1024;
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
     #[error("{0}")]
@@ -123,6 +124,15 @@ pub fn import_with_open_nodes(bytes: &[u8], already_open: usize) -> Result<Docum
         return Err(bad("compressed file exceeds cap"));
     }
     import_package(Package::open(bytes)?, HashMap::new(), already_open)
+}
+/// Import the same open archive that the caller checked and reserved. The
+/// caller checks its compressed size against `MAX_FILE` when opening it.
+pub fn import_archive_with_open_nodes(
+    archive: zip::ZipArchive<impl Read + std::io::Seek>,
+    reserved_bytes: u64,
+    already_open: usize,
+) -> Result<Document, ReadError> {
+    import_package(Package::from_archive(archive, reserved_bytes)?, HashMap::new(), already_open)
 }
 /// Reimport an engine publication, reusing only reader-proven immutable source parts.
 /// https://learn.microsoft.com/en-us/office/client-developer/visio/introduction-to-the-visio-file-formatvsdx
