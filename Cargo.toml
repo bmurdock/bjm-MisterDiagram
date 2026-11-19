@@ -36,7 +36,7 @@ rayon = "1"
 unicode-bidi = "0.3"
 unicode-segmentation = "1"
 unicode-linebreak = "0.1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+jiff = { version = "1", default-features = false, features = ["std", "js"] }
 
 # text / rendering / formats
 skrifa = "0.47"
@@ -44,7 +44,7 @@ harfrust = "0.13"
 vello_cpu = "0.2"
 vello_common = { version = "0.2", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp"] }
-krilla = { version = "0.8", features = ["pdf"] }
+krilla = { version = "0.8", default-features = false, features = ["pdf", "raster-images"] }
 i_overlay = "9"
 quick-xml = "0.41"
 zip = { version = "9.5", default-features = false, features = ["deflate"] }
