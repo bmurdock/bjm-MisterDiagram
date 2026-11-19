@@ -42,7 +42,7 @@ fn bounds(e: &mut Evaluator<'_>, page: u32, shape: u32) -> Result<BoxShape, Stri
     let resolved = e.resolved_named_cells(scope);
     let present: std::collections::HashSet<_> = resolved.iter().map(|n| n.name.to_ascii_lowercase()).collect();
     for named in resolved {
-        if named.cell.name != "X" || !named.section.is_some_and(|s| s.name == "Connection") {
+        if named.cell.name != "X" || named.section.is_none_or(|s| s.name != "Connection") {
             continue;
         }
         if points.len() >= 16384 {
@@ -152,7 +152,7 @@ fn endpoint(b: &BoxShape, other: &BoxShape, vertical: bool) -> Result<Point, Str
     let high_x = b.max.x.min(other.max.x);
     let horizontal_overlap = low_y <= high_y;
     let vertical_overlap = low_x <= high_x;
-    let preferred_vertical = vertical && vertical_overlap || !horizontal_overlap && vertical_overlap;
+    let preferred_vertical = vertical_overlap && (vertical || !horizontal_overlap);
     let candidate = if preferred_vertical {
         Point::new((low_x + high_x) * 0.5, if far.y >= c.y { b.max.y } else { b.min.y })
     } else if horizontal_overlap {

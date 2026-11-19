@@ -3,7 +3,10 @@
 //! Cluster text ranges and their test from deckcraft crates/pdf/src/{lib,tests}.rs,
 //! dd404af8b53029e80d1ff9a7ede02619fdc7ab8a, MarekSpodBiedry, MIT OR Apache-2.0.
 //! Scene paths remain vectors and glyphs remain extractable text.
-use crate::scene::{Op, Options, Paint, Scene};
+use crate::{
+    raster::{VECTOR_OUTPUT_BYTES, VECTOR_RASTER_PIXELS, VectorRasterBudget},
+    scene::{Op, Options, Paint, Scene},
+};
 use krilla::{
     geom::{PathBuilder, Point, Size, Transform},
     num::NormalizedF32,
@@ -37,18 +40,23 @@ fn path(p: &kurbo::BezPath) -> Option<krilla::geom::Path> {
     }
     b.finish()
 }
-fn image(surface: &mut Surface, pixels: &image::RgbaImage, m: Affine) -> Result<(), String> {
-    let size = Size::from_wh(pixels.width() as f32, pixels.height() as f32).ok_or("invalid PDF image dimensions")?;
+fn image(surface: &mut Surface, pixels: image::RgbaImage, m: Affine) -> Result<(), String> {
+    let (width, height) = pixels.dimensions();
+    let size = Size::from_wh(width as f32, height as f32).ok_or("invalid PDF image dimensions")?;
     surface.push_transform(&tf(m));
-    surface.draw_image(krilla::image::Image::from_rgba8(pixels.as_raw().clone(), pixels.width(), pixels.height()), size);
+    surface.draw_image(krilla::image::Image::from_rgba8(pixels.into_raw(), width, height), size);
     surface.pop();
     Ok(())
 }
 pub fn render(scenes: &[Scene], options: Options) -> Result<Vec<u8>, String> {
+    render_limited(scenes, options, VECTOR_RASTER_PIXELS, VECTOR_OUTPUT_BYTES)
+}
+pub(crate) fn render_limited(scenes: &[Scene], options: Options, pixels: usize, output_limit: usize) -> Result<Vec<u8>, String> {
     if scenes.is_empty() || scenes.len() > 4096 {
         return Err("PDF page count limit".into());
     }
     let mut pdf = krilla::Document::new();
+    let mut raster_budget = VectorRasterBudget::new(pixels);
     let mut fonts: HashMap<u32, Font> = HashMap::new();
     for scene in scenes {
         let (width, height, pixel_view) = if options.fit {
@@ -114,14 +122,14 @@ pub fn render(scenes: &[Scene], options: Options) -> Result<Vec<u8>, String> {
                                 surface.draw_path(&path);
                             }
                             _ => {
-                                let (pixels, m) = crate::raster::pattern(paint, pattern_view, p)?;
+                                let (pixels, m) = crate::raster::pattern(paint, pattern_view, p, Some(&mut raster_budget))?;
                                 surface.push_clip_path(&path, &if *even_odd { FillRule::EvenOdd } else { FillRule::NonZero });
                                 let m = if options.page_canvas && !options.fit {
                                     view * pattern_view.inverse() * m
                                 } else {
                                     Affine::scale(72. / (96. * options.scale)) * m
                                 };
-                                image(&mut surface, &pixels, m)?;
+                                image(&mut surface, pixels, m)?;
                                 surface.pop();
                             }
                         }
@@ -139,7 +147,10 @@ pub fn render(scenes: &[Scene], options: Options) -> Result<Vec<u8>, String> {
                         surface.draw_path(&p);
                     }
                 }
-                Op::Image { pixels, transform } | Op::RasterImage { pixels, transform } => image(&mut surface, pixels, view * *transform)?,
+                Op::Image { pixels, transform } | Op::RasterImage { pixels, transform } => {
+                    raster_budget.charge(pixels.width(), pixels.height())?;
+                    image(&mut surface, pixels.as_ref().clone(), view * *transform)?;
+                }
                 Op::Text { layout, transform, .. } => {
                     for deco in &layout.decos {
                         if let Some(path) = path(&(view * *transform * kurbo::Shape::to_path(&deco.rect, 1e-5))) {
@@ -200,7 +211,11 @@ pub fn render(scenes: &[Scene], options: Options) -> Result<Vec<u8>, String> {
         surface.finish();
         page.finish();
     }
-    pdf.finish().map_err(|e| format!("PDF finish: {e:?}"))
+    let bytes = pdf.finish().map_err(|e| format!("PDF finish: {e:?}"))?;
+    if bytes.len() > output_limit {
+        return Err("PDF output limit".into());
+    }
+    Ok(bytes)
 }
 
 /// Byte range in `text` (the run's characters `chars`) of each of `n` glyphs, for the ToUnicode map.

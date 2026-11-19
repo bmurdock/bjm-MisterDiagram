@@ -74,9 +74,32 @@ fn draw_image(ctx: &mut RenderContext, pixels: &image::RgbaImage, m: Affine, nea
     ctx.fill_rect(&bounds);
     Ok(())
 }
+/// Bound cumulative raster work and retained image data during a vector export.
+pub(crate) struct VectorRasterBudget(usize);
+
+pub(crate) const VECTOR_RASTER_PIXELS: usize = 64 * 1024 * 1024;
+pub(crate) const VECTOR_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
+
+impl VectorRasterBudget {
+    pub(crate) fn new(pixels: usize) -> Self {
+        Self(pixels)
+    }
+
+    pub(crate) fn charge(&mut self, width: u32, height: u32) -> Result<(), String> {
+        let pixels = usize::try_from(u64::from(width) * u64::from(height)).map_err(|_| "vector export raster pixel limit")?;
+        self.0 = self.0.checked_sub(pixels).ok_or("vector export raster pixel limit")?;
+        Ok(())
+    }
+}
+
 /// Sample the procedural paint in its shape coordinate system into a bounded image.
 /// The same image and clip are used in SVG and PDF output.
-pub(crate) fn pattern(paint: &Paint, view: Affine, path: &BezPath) -> Result<(image::RgbaImage, Affine), String> {
+pub(crate) fn pattern(
+    paint: &Paint,
+    view: Affine,
+    path: &BezPath,
+    budget: Option<&mut VectorRasterBudget>,
+) -> Result<(image::RgbaImage, Affine), String> {
     use kurbo::Shape as _;
     let Paint::Pattern { fill, gradient, bounds, transform } = paint else {
         return Err("expected pattern".into());
@@ -96,6 +119,9 @@ pub(crate) fn pattern(paint: &Paint, view: Affine, path: &BezPath) -> Result<(im
     if gradient.as_ref().is_some_and(|g| !g.valid()) {
         return Err("invalid gradient paint".into());
     }
+    if let Some(budget) = budget {
+        budget.charge(w as u32, h as u32)?;
+    }
     let image = image::RgbaImage::from_fn(w as u32, h as u32, |px, py| {
         let p = local * kurbo::Point::new(x + f64::from(px) + 0.5, y + f64::from(py) + 0.5);
         let nx = (p.x - bounds.x0) / bounds.width().max(1e-12);
@@ -108,6 +134,43 @@ pub(crate) fn pattern(paint: &Paint, view: Affine, path: &BezPath) -> Result<(im
         image::Rgba([c.r, c.g, c.b, c.a])
     });
     Ok((image, Affine::translate((x, y))))
+}
+
+#[cfg(test)]
+mod vector_budget_tests {
+    use super::*;
+    use crate::{pdf, svg};
+    use kurbo::{Rect, Shape};
+    use misterdiagram_color::Rgba;
+
+    #[test]
+    fn patterned_fills_share_raster_work_and_encoded_output_limits() {
+        let bounds = Rect::new(0., 0., 1., 1.);
+        let pattern = Op::Path {
+            even_odd: false,
+            path: bounds.to_path(0.001),
+            paint: Paint::Pattern {
+                fill: crate::style::Fill { pattern: 2, foreground: Rgba::BLACK, background: Rgba::WHITE },
+                gradient: None,
+                bounds,
+                transform: Affine::IDENTITY,
+            },
+        };
+        let mut scene =
+            Scene { ops: vec![pattern.clone()], bounds, page_size: (1., 1.), fit_empty: false, warnings: vec![], pdf_strokes: Default::default() };
+        let options = Options { page_canvas: true, ..Default::default() };
+        let cap = 96 * 96;
+        let svg = svg::render_limited(&scene, options, cap, VECTOR_OUTPUT_BYTES).unwrap();
+        let pdf = pdf::render_limited(std::slice::from_ref(&scene), options, cap, VECTOR_OUTPUT_BYTES).unwrap();
+        assert!(svg.contains("data:image/png;base64,"));
+        assert!(pdf.starts_with(b"%PDF"));
+        let two_pages = [scene.clone(), scene.clone()];
+        assert!(pdf::render_limited(&two_pages, options, cap, VECTOR_OUTPUT_BYTES).unwrap_err().contains("raster pixel limit"));
+        assert!(pdf::render_limited(&two_pages[..1], options, cap, 1).unwrap_err().contains("PDF output limit"));
+        assert!(svg::render_limited(&scene, options, cap, svg.len() - 32).unwrap_err().contains("SVG output limit"));
+        scene.ops.push(pattern);
+        assert!(svg::render_limited(&scene, options, cap, VECTOR_OUTPUT_BYTES).unwrap_err().contains("raster pixel limit"));
+    }
 }
 pub fn render(scene: &Scene, options: Options) -> Result<image::RgbaImage, String> {
     render_background(scene, options, true, scene.canvas(options)?)
@@ -153,7 +216,7 @@ fn render_background(scene: &Scene, options: Options, white: bool, canvas: (u16,
                     _ => {
                         ctx.set_transform(view);
                         ctx.push_clip_layer(path);
-                        let (pixels, m) = pattern(paint, view, path)?;
+                        let (pixels, m) = pattern(paint, view, path, None)?;
                         draw_image(&mut ctx, &pixels, m, true)?;
                         ctx.pop_layer();
                     }

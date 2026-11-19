@@ -56,7 +56,7 @@ fn summary(doc: &Document, app: &mut XmlElement) {
 /// Dates are fresh UTC values; lastModifiedBy/lastPrinted remain Visio first-save stamps.
 /// https://learn.microsoft.com/en-us/office/client-developer/visio/introduction-to-the-visio-file-formatvsdx
 pub(super) fn metadata(doc: &mut Document, metric: bool) {
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let now = format!("{:.0}", jiff::Timestamp::now());
     let core_ns = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties";
     let dc = "http://purl.org/dc/elements/1.1/";
     let dt = "http://purl.org/dc/terms/";

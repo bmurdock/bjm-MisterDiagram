@@ -1,6 +1,9 @@
 //! A small SVG writer for the shared render scene; no external resources.
-use crate::scene::{Op, Options, Paint, Scene, text_paths};
-use base64::Engine as _;
+use crate::{
+    raster::{VECTOR_OUTPUT_BYTES, VECTOR_RASTER_PIXELS, VectorRasterBudget},
+    scene::{Op, Options, Paint, Scene, text_paths},
+};
+use image::ImageEncoder as _;
 use misterdiagram_geom::Affine;
 use std::fmt::Write as _;
 mod metatext;
@@ -17,16 +20,41 @@ fn fill_path(out: &mut String, p: &kurbo::BezPath, c: misterdiagram_color::Rgba,
     let rule = if even_odd { r#" fill-rule="evenodd""# } else { "" };
     let _ = write!(out, "<path{rule} d=\"{}\" fill=\"#{:02x}{:02x}{:02x}\" fill-opacity=\"{}\"/>", p.to_svg(), c.r, c.g, c.b, f64::from(c.a) / 255.);
 }
-fn image(out: &mut String, pixels: &image::RgbaImage, m: Affine, nearest: bool) -> Result<(), String> {
+struct ImageData<'a> {
+    out: &'a mut String,
+    limit: usize,
+}
+impl std::io::Write for ImageData<'_> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if self.out.len().saturating_add(data.len()) > self.limit {
+            return Err(std::io::Error::other("SVG output limit"));
+        }
+        let data = std::str::from_utf8(data).map_err(std::io::Error::other)?;
+        self.out.push_str(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+fn image(
+    out: &mut String,
+    pixels: &image::RgbaImage,
+    m: Affine,
+    nearest: bool,
+    raster_budget: &mut VectorRasterBudget,
+    output_limit: usize,
+) -> Result<(), String> {
     let bordered;
     let source = if nearest {
+        // Procedural images are charged before rasterization.
         pixels
     } else {
+        raster_budget.charge(pixels.width().saturating_add(4), pixels.height().saturating_add(4))?;
         bordered = crate::raster::transparent_border(pixels)?;
         &bordered
     };
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    source.write_to(&mut bytes, image::ImageFormat::Png).map_err(|e| e.to_string())?;
     if !nearest {
         write!(
             out,
@@ -39,22 +67,31 @@ fn image(out: &mut String, pixels: &image::RgbaImage, m: Affine, nearest: bool) 
         )
         .map_err(|e| e.to_string())?;
     }
-    let data = base64::engine::general_purpose::STANDARD.encode(bytes.get_ref());
     write!(
         out,
-        "<image image-rendering=\"{}\" width=\"{}\" height=\"{}\" transform=\"{}\" href=\"data:image/png;base64,{data}\"/>",
+        "<image image-rendering=\"{}\" width=\"{}\" height=\"{}\" transform=\"{}\" href=\"data:image/png;base64,",
         if nearest { "optimizeSpeed" } else { "optimizeQuality" },
         source.width(),
         source.height(),
         matrix(if nearest { m } else { Affine::IDENTITY })
     )
     .map_err(|e| e.to_string())?;
-    if !nearest {
-        out.push_str("</svg></g>");
+    let suffix = if nearest { "\"/>" } else { "\"/></svg></g>" };
+    let limit = output_limit.checked_sub(suffix.len()).filter(|limit| *limit >= out.len()).ok_or("SVG output limit")?;
+    {
+        let mut encoded = base64::write::EncoderWriter::new(ImageData { out, limit }, &base64::engine::general_purpose::STANDARD);
+        image::codecs::png::PngEncoder::new(&mut encoded)
+            .write_image(source.as_raw(), source.width(), source.height(), image::ExtendedColorType::Rgba8)
+            .map_err(|e| e.to_string())?;
+        encoded.finish().map_err(|e| e.to_string())?;
     }
+    out.push_str(suffix);
     Ok(())
 }
 pub fn render(scene: &Scene, options: Options) -> Result<String, String> {
+    render_limited(scene, options, VECTOR_RASTER_PIXELS, VECTOR_OUTPUT_BYTES)
+}
+pub(crate) fn render_limited(scene: &Scene, options: Options, pixels: usize, output_limit: usize) -> Result<String, String> {
     let (w, h, view) = if options.fit {
         let (w, h, view) = scene.fit_canvas(options)?;
         let factor = 72. / (96. * options.scale);
@@ -87,6 +124,8 @@ pub fn render(scene: &Scene, options: Options) -> Result<String, String> {
             scene.page_size.0, scene.page_size.1
         );
     }
+    let output_limit = output_limit.checked_sub("</svg>".len()).ok_or("SVG output limit")?;
+    let mut raster_budget = VectorRasterBudget::new(pixels);
     let mut legacy_index = 0usize;
     let mut skip = 0usize;
     let mut record_index = 0usize;
@@ -94,6 +133,9 @@ pub fn render(scene: &Scene, options: Options) -> Result<String, String> {
         if let Op::MetaText(record) = op {
             if !options.text_outlines && !record.outlines_only {
                 metatext::write(&mut out, record, view, record_index, options.font_names)?;
+                if out.len() > output_limit {
+                    return Err("SVG output limit".into());
+                }
                 skip = record.outline_ops;
             }
             record_index = record_index.saturating_add(1);
@@ -125,7 +167,7 @@ pub fn render(scene: &Scene, options: Options) -> Result<String, String> {
             Op::Path { even_odd, path: p, paint } => match paint {
                 Paint::Solid(c) => fill_path(&mut out, &(view * p), *c, *even_odd),
                 _ => {
-                    let (pixels, m) = crate::raster::pattern(paint, pattern_view, p)?;
+                    let (pixels, m) = crate::raster::pattern(paint, pattern_view, p, Some(&mut raster_budget))?;
                     write!(
                         out,
                         "<defs><clipPath id=\"p{i}\"><path clip-rule=\"{}\" d=\"{}\"/></clipPath></defs><g clip-path=\"url(#p{i})\">",
@@ -134,7 +176,7 @@ pub fn render(scene: &Scene, options: Options) -> Result<String, String> {
                     )
                     .map_err(|e| e.to_string())?;
                     let m = if options.page_canvas || options.fit { view * pattern_view.inverse() * m } else { m };
-                    image(&mut out, &pixels, m, true)?;
+                    image(&mut out, &pixels, m, true, &mut raster_budget, output_limit)?;
                     out.push_str("</g>");
                 }
             },
@@ -165,7 +207,9 @@ pub fn render(scene: &Scene, options: Options) -> Result<String, String> {
                     write!(out,"<path d=\"{}\" fill=\"none\" stroke=\"#{:02x}{:02x}{:02x}\" stroke-opacity=\"{}\" stroke-width=\"{}\" stroke-linecap=\"{cap}\" stroke-linejoin=\"{join}\" stroke-miterlimit=\"{}\" stroke-dasharray=\"{}\" stroke-dashoffset=\"{}\"/>",(view*p).to_svg(),color.r,color.g,color.b,f64::from(color.a)/255.,stroke.width*dpi,stroke.miter_limit,if dashes.is_empty(){"none"}else{&dashes},stroke.dash_offset*dash_scale).map_err(|e|e.to_string())?;
                 }
             }
-            Op::Image { pixels, transform } | Op::RasterImage { pixels, transform } => image(&mut out, pixels, view * *transform, false)?,
+            Op::Image { pixels, transform } | Op::RasterImage { pixels, transform } => {
+                image(&mut out, pixels, view * *transform, false, &mut raster_budget, output_limit)?;
+            }
             Op::Text { layout, transform, .. } => {
                 if options.text_outlines {
                     for (p, c) in text_paths(layout, view * *transform) {
@@ -179,9 +223,12 @@ pub fn render(scene: &Scene, options: Options) -> Result<String, String> {
                 }
             }
         }
-        if out.len() > 256 * 1024 * 1024 {
+        if out.len() > output_limit {
             return Err("SVG output limit".into());
         }
+    }
+    if out.len() > output_limit {
+        return Err("SVG output limit".into());
     }
     out.push_str("</svg>");
     Ok(out)

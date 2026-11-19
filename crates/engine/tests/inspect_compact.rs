@@ -81,7 +81,7 @@ fn a2_outline_is_small_and_groups_connector_ends() {
     // One-ended links and filtering a target without its connector.
     s.edit_document(|doc, _| {
         doc.pages[0].connects.retain(|c| {
-            !(c.from_sheet == 31 && c.from_cell.as_deref() == Some("EndX")) && !(c.from_sheet == 32 && c.from_cell.as_deref() == Some("BeginX"))
+            !(c.from_sheet == 31 && c.from_cell.as_deref() == Some("EndX") || c.from_sheet == 32 && c.from_cell.as_deref() == Some("BeginX"))
         });
         Ok(())
     })

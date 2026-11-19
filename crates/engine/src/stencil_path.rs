@@ -5,11 +5,8 @@ use std::path::{Path, PathBuf};
 
 pub(super) fn bare(path: &Path) -> bool {
     let Some(name) = path.to_str() else { return false };
-    !name.is_empty()
-        && name != "."
-        && !name.contains("..")
-        && !name.contains(['/', '\\', '\0'])
-        && !(name.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) && name.as_bytes().get(1) == Some(&b':'))
+    let drive_prefix = name.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) && name.as_bytes().get(1) == Some(&b':');
+    !name.is_empty() && name != "." && !name.contains("..") && !name.contains(['/', '\\', '\0']) && !drive_prefix
 }
 fn folders(configured: &[PathBuf]) -> Vec<PathBuf> {
     if configured.is_empty() {

@@ -503,13 +503,7 @@ fn metadata(evaluator: &Evaluator<'_>, scope: Scope, n: &NamedCell<'_>) -> Optio
                 32
             }
         }
-        6 => {
-            if c < 2 {
-                73
-            } else {
-                32
-            }
-        }
+        6 if c < 2 => 73,
         8 => 32,
         9 => {
             if c < 4 {
@@ -533,13 +527,7 @@ fn metadata(evaluator: &Evaluator<'_>, scope: Scope, n: &NamedCell<'_>) -> Optio
             11 => 33,
             _ => 32,
         },
-        242 => {
-            if c == 1 {
-                231
-            } else {
-                32
-            }
-        }
+        242 if c == 1 => 231,
         243 => {
             if matches!(c, 1..=4) {
                 231

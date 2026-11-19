@@ -17,16 +17,20 @@ fn save(root: &Path, name: &str, d: &Document, kind: SaveKind) -> Document {
     let titles = app.elements().find(|e| e.name == "TitlesOfParts").unwrap().elements().next().unwrap();
     assert_eq!(titles.attr("size").unwrap().parse::<usize>().unwrap(), d.pages.len() + d.masters.len());
     let core = reread.parts["docProps/core.xml"].xml.as_ref().unwrap();
+    let created = core.elements().find(|e| e.name == "created").unwrap().text();
+    assert_eq!(created.len(), "0000-00-00T00:00:00Z".len(), "{created}");
+    assert_eq!(created.as_bytes()[10], b'T', "{created}");
+    assert!(created.ends_with('Z') && created.parse::<jiff::Timestamp>().is_ok(), "{created}");
     for name in ["created", "modified"] {
         let c = core.elements().find(|e| e.name == name).unwrap();
-        assert!(chrono::DateTime::parse_from_rfc3339(&c.text()).is_ok());
+        assert_eq!(c.text(), created);
         assert_eq!(c.attr("xsi:type"), Some("dcterms:W3CDTF"));
     }
     assert_eq!(core.elements().find(|e| e.name == "language").unwrap().text(), "en-US");
     let custom = reread.parts["docProps/custom.xml"].xml.as_ref().unwrap();
     let edited = custom.elements().find(|e| e.attr("name") == Some("TimeEdited")).unwrap();
     assert_eq!(edited.attr("pid"), Some("6"));
-    assert!(chrono::DateTime::parse_from_rfc3339(&edited.text()).is_ok());
+    assert_eq!(edited.text(), created);
     assert!(!reread.root_relationships.iter().any(|r| r.type_uri.ends_with("/thumbnail")));
     if root.join("corpus").exists() {
         let out = root.join("corpus/_state/m3/scratch");

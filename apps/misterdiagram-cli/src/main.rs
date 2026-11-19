@@ -2,33 +2,51 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 mod author;
 mod settings;
-use misterdiagram_opc::{MAX_TOTAL, Package};
+use misterdiagram_opc::Package;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
+// Match the compressed input cap used by the Visio document reader.
+const MAX_INFO_FILE: u64 = 512 * 1024 * 1024;
+
+fn info_field(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if c == '\\' || c.is_control() || matches!(c, '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}') {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
 fn info(path: &Path, out: &mut impl Write) -> Result<(), String> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !matches!(ext.as_str(), "vsdx" | "vssx" | "vstx" | "vsdm" | "vssm" | "vstm") {
         return Err("expected .vsdx, .vssx, .vstx, .vsdm, .vssm or .vstm".into());
     }
     let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
-    f.take(MAX_TOTAL + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > MAX_TOTAL {
+    if f.metadata().map_err(|e| e.to_string())?.len() > MAX_INFO_FILE {
         return Err("compressed package exceeds size cap".into());
     }
-    let p = Package::open(&bytes).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    f.take(MAX_INFO_FILE + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_INFO_FILE {
+        return Err("compressed package exceeds size cap".into());
+    }
+    let p = Package::open(&bytes).map_err(|e| info_field(&e.to_string()))?;
     p.validate_visio().map_err(|e| e.to_string())?;
     for (name, data) in p.parts() {
         let ct = if name == "[Content_Types].xml" {
             "application/xml".into()
         } else {
-            p.content_type(name).ok_or_else(|| format!("no content type for {name}"))?
+            p.content_type(name).ok_or_else(|| format!("no content type for {}", info_field(name)))?
         };
-        writeln!(out, "{name}\t{ct}\t{}", data.len()).map_err(|e| e.to_string())?;
+        writeln!(out, "{}\t{}\t{}", info_field(name), info_field(&ct), data.len()).map_err(|e| e.to_string())?;
     }
     for r in p.rels("").items {
-        writeln!(out, "relationship\t{}\t{}\t{}\texternal={}", r.id, r.kind, r.target, r.external).map_err(|e| e.to_string())?;
+        writeln!(out, "relationship\t{}\t{}\t{}\texternal={}", info_field(&r.id), info_field(&r.kind), info_field(&r.target), r.external)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

@@ -218,7 +218,7 @@ pub(crate) fn document(d: &Document) -> Result<(), WriteError> {
         b.sheet(&p.sheet)?;
         b.shapes(&p.shapes)?;
     }
-    background_chains(d)?;
+    d.validate_backgrounds().map_err(error)?;
     let mut ids = BTreeSet::new();
     for m in &d.masters {
         if !ids.insert(m.id) {
@@ -349,29 +349,6 @@ fn master_ids(d: &Document, m: &Master) -> Result<(), WriteError> {
             return Err(error(format!("master {} content shape ID {} must start at 5", m.id, shape.id)));
         }
         pending.extend(&shape.shapes);
-    }
-    Ok(())
-}
-
-/// Validate the bounded BackPage graph before writing page relationships.
-/// https://learn.microsoft.com/en-us/office/client-developer/visio/page-element-pages_type-complextypevisio-xml
-fn background_chains(d: &Document) -> Result<(), WriteError> {
-    let pages: BTreeMap<_, _> = d.pages.iter().map(|p| (p.id, p)).collect();
-    let mut complete = BTreeSet::new();
-    for page in &d.pages {
-        let mut path = BTreeSet::new();
-        let mut next = Some(page.id);
-        while let Some(id) = next {
-            if complete.contains(&id) {
-                break;
-            }
-            if !path.insert(id) {
-                return Err(error("background page cycle"));
-            }
-            let page = pages.get(&id).ok_or_else(|| error("missing background page"))?;
-            next = page.attributes.get("BackPage").map(|v| v.parse::<u32>().map_err(|_| error("invalid background page ID"))).transpose()?;
-        }
-        complete.extend(path);
     }
     Ok(())
 }

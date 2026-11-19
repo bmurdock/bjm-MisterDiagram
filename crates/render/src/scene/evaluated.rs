@@ -184,24 +184,10 @@ impl EvaluatedShape {
 /// A pixel-only canvas refusal is deferred to the consumer: vector exports can
 /// uniformly scale an oversized page before allocating their bounded raster.
 pub fn page(document: &Document, index: usize, options: Options, budget: &mut SceneBudget) -> Result<EvaluatedPage, String> {
-    let themes = misterdiagram_theme::Themes::from_document(document).map_err(|e| e.to_string())?;
-    let host = misterdiagram_text::Host;
-    let evaluator = Evaluator::new(document).map_err(|e| e.to_string())?.with_theme_host(&themes).with_text_host(&host);
-    let mut evaluator = if options.cached_fallback { evaluator.with_cached_fallback() } else { evaluator };
-    super::page_evaluated_prepared(&mut evaluator, index, options, budget, true)
+    super::with_page_evaluator(document, options, |evaluator| super::page_evaluated_prepared(evaluator, index, options, budget, true))
 }
 pub fn foreground_pages(document: &Document, options: Options, budget: &mut SceneBudget) -> Result<Vec<EvaluatedPage>, String> {
-    let mut pages = Vec::new();
-    for (index, source) in document.pages.iter().enumerate() {
-        if source.attributes.get("Background").is_some_and(|s| s == "1" || s == "true") {
-            continue;
-        }
-        if pages.len() >= 4096 {
-            return Err("export page limit".into());
-        }
-        pages.push(page(document, index, options, budget)?);
-    }
-    Ok(pages)
+    super::foreground_evaluated(document, options, budget, true)
 }
 pub(super) fn connection_sites(
     e: &mut Evaluator<'_>,

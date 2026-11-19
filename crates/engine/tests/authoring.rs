@@ -37,6 +37,64 @@ fn pages_background_scale_and_layers_are_transactional() {
     assert_eq!(s.document().pages[0].sheet.sections.iter().find(|s| s.name == "Layer").unwrap().rows.len(), 1);
 }
 #[test]
+fn background_edits_cannot_exceed_the_renderer_depth_through_any_page() {
+    use misterdiagram_model::{MAX_BACKGROUND_PAGES, skeleton};
+    let mut s = Session::new();
+    let end = u32::try_from(MAX_BACKGROUND_PAGES).unwrap();
+    s.edit_document(|doc, _| {
+        doc.pages[0].attributes.insert("BackPage".into(), "1".into());
+        for id in 1..=end {
+            let mut page = skeleton::page(id, &format!("Page {id}"), false);
+            if id < end {
+                page.attributes.insert("Background".into(), "1".into());
+            }
+            if id + 1 < end {
+                page.attributes.insert("BackPage".into(), (id + 1).to_string());
+            }
+            doc.pages.push(page);
+        }
+        Ok(())
+    })
+    .unwrap();
+    misterdiagram_render::scene::page(s.document(), 0, Default::default()).unwrap();
+    let before = s.document().clone();
+    let root = before.page_ordinal(0).unwrap();
+    let tail = before.page_ordinal(MAX_BACKGROUND_PAGES - 1).unwrap();
+    let spare = before.page_ordinal(MAX_BACKGROUND_PAGES).unwrap();
+    for (page, background) in [(spare, root), (tail, spare)] {
+        let error = s.execute("page.background", &json!({"page":page,"background":background})).unwrap_err().to_string();
+        assert!(error.contains("background page depth limit"), "{error}");
+        assert_eq!(s.document(), &before);
+    }
+}
+
+#[test]
+fn layer_deletion_remaps_literal_formulas_and_refuses_dynamic_membership() {
+    let mut s = Session::new();
+    for name in ["Keep", "Delete", "Shift"] {
+        run(&mut s, "layer.add", json!({"page":1,"name":name}));
+    }
+    for (x, formula) in [(1, r#"="0""#), (2, r#""2""#), (3, r#"IF(Width>1,"0","2")"#)] {
+        let shape = run(&mut s, "shape.draw.rect", json!({"x":x,"y":1,"width":2,"height":1}));
+        let id = &shape["id"];
+        run(&mut s, "layer.assign", json!({"id":id,"layers":[0]}));
+        run(&mut s, "sheet.set", json!({"id":id,"name":"LayerMember","formula":formula}));
+    }
+    let original = s.document().clone();
+    let error = s.execute("layer.delete", &json!({"layer":1})).unwrap_err().to_string();
+    assert!(error.contains("LayerMember formula on shape 3"), "{error}");
+    assert_eq!(s.document(), &original);
+
+    run(&mut s, "layer.assign", json!({"id":3,"layers":[1,2]}));
+    run(&mut s, "layer.delete", json!({"layer":1}));
+    let membership = |index: usize| s.document().pages[0].shapes[index].sheet.cell("LayerMember").unwrap();
+    assert_eq!(membership(0), original.pages[0].shapes[0].sheet.cell("LayerMember").unwrap());
+    assert_eq!(membership(1).formula.as_deref(), Some(r#""1""#));
+    assert_eq!(membership(1).value.as_deref(), Some("1"));
+    assert_eq!(membership(2).value.as_deref(), Some("1"));
+}
+
+#[test]
 fn draw_transform_order_delete_and_undo() {
     let mut s = Session::new();
     run(&mut s, "shape.draw.rect", json!({"x":1,"y":2,"width":3,"height":4}));

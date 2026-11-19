@@ -1,7 +1,7 @@
 //! MCP tools backed by the engine's public command schemas.
 use crate::backend::Backend;
 use serde_json::{Value, json};
-const TOOL_RESULT_BYTES: usize = 1024 * 1024;
+pub(crate) const TOOL_RESULT_BYTES: usize = 1024 * 1024;
 pub struct ToolResult(Result<Value, String>);
 struct ResultBudget(usize);
 impl std::io::Write for ResultBudget {

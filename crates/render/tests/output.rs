@@ -88,7 +88,7 @@ fn arrow_and_cap_export_dimensions_match_all_generated_witnesses() {
     for group in ["arrow", "line"] {
         for entry in std::fs::read_dir(root.join("generated").join(group)).unwrap() {
             let file = entry.unwrap().path();
-            if !file.extension().is_some_and(|e| e == "vsdx") {
+            if file.extension().is_none_or(|e| e != "vsdx") {
                 continue;
             }
             let doc = misterdiagram_vsdx::read(&file).unwrap();
@@ -244,7 +244,7 @@ fn text_blocks_and_unkerned_lines_match_visio_svg() {
     let mut count = 0;
     for entry in std::fs::read_dir(root.join("generated/text")).unwrap() {
         let file = entry.unwrap().path();
-        if !file.extension().is_some_and(|s| s == "vsdx") {
+        if file.extension().is_none_or(|s| s != "vsdx") {
             continue;
         }
         let doc = misterdiagram_vsdx::read(&file).unwrap();

@@ -1920,7 +1920,7 @@ impl Context for BoundContext<'_, '_> {
     fn theme_default(&mut self, name: &str) -> Value {
         let prototype = if name.starts_with("char.") { name.split('[').next().unwrap_or(name) } else { name };
         if !matches!(prototype, "beginarrow" | "endarrow" | "beginarrowsize" | "endarrowsize")
-            && !defaults::cell(Scope::PageShape { page: 0, shape: 0 }, prototype).is_some_and(|c| c.formula.as_deref() == Some("THEMEVAL()"))
+            && defaults::cell(Scope::PageShape { page: 0, shape: 0 }, prototype).is_none_or(|c| c.formula.as_deref() != Some("THEMEVAL()"))
         {
             return Value::Error(Error::Value);
         }

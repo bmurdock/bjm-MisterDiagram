@@ -420,6 +420,9 @@ pub mod text;
 
 pub mod skeleton;
 
+/// Maximum total pages in a foreground/background chain, including the starting page.
+pub const MAX_BACKGROUND_PAGES: usize = 128;
+
 impl Page {
     /// Whether this page is a background, independent of its package position.
     /// https://learn.microsoft.com/en-us/office/client-developer/visio/page-element-pages_type-complextypevisio-xml
@@ -428,6 +431,40 @@ impl Page {
     }
 }
 impl Document {
+    /// Check every BackPage chain, including pages that depend on an edited background.
+    /// https://learn.microsoft.com/en-us/office/client-developer/visio/page-element-pages_type-complextypevisio-xml
+    pub fn validate_backgrounds(&self) -> Result<(), &'static str> {
+        let pages: BTreeMap<_, _> = self.pages.iter().map(|page| (page.id, page)).collect();
+        let mut depths = BTreeMap::new();
+        for page in &self.pages {
+            let mut chain = Vec::new();
+            let mut depth = 0;
+            let mut next = Some(page.id);
+            while let Some(id) = next {
+                if let Some(&known) = depths.get(&id) {
+                    depth = known;
+                    break;
+                }
+                if chain.contains(&id) {
+                    return Err("background page cycle");
+                }
+                if chain.len() == MAX_BACKGROUND_PAGES {
+                    return Err("background page depth limit");
+                }
+                chain.push(id);
+                let page = pages.get(&id).ok_or("missing background page")?;
+                next = page.attributes.get("BackPage").map(|id| id.parse().map_err(|_| "invalid background page ID")).transpose()?;
+            }
+            if chain.len() + depth > MAX_BACKGROUND_PAGES {
+                return Err("background page depth limit");
+            }
+            for (i, id) in chain.into_iter().rev().enumerate() {
+                depths.insert(id, depth + i + 1);
+            }
+        }
+        Ok(())
+    }
+
     /// Page ordinals visit foreground pages first, then backgrounds, preserving
     /// file order within each group. Returned indexes still address `pages`.
     /// https://learn.microsoft.com/en-us/office/vba/api/visio.page.index

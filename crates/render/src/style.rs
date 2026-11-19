@@ -388,7 +388,7 @@ pub fn round_rectangle(path: &BezPath, radius: f64) -> BezPath {
                 let u = a / la;
                 let v = b / lb;
                 let turn = u.cross(v).atan2(u.dot(v)).abs();
-                if turn < 1e-6 || turn > std::f64::consts::PI - 1e-6 {
+                if !(1e-6..=std::f64::consts::PI - 1e-6).contains(&turn) {
                     return None;
                 }
                 let tan = (turn * 0.5).tan();

@@ -124,18 +124,22 @@ impl Session {
     /// Reserve declared package buffers before the reader decompresses them.
     /// The reader independently enforces all unchanged hostile-input bounds.
     pub(crate) fn read_document(&self, path: &std::path::Path, stencil: bool) -> Result<Document> {
-        use misterdiagram_opc::{MAX_ENTRIES, MAX_PART, MAX_TOTAL};
         use std::io::{Read, Seek};
         let mut file = std::fs::File::open(path).map_err(operation)?;
-        if file.metadata().map_err(operation)?.len() > MAX_PART {
+        if file.metadata().map_err(operation)?.len() > misterdiagram_vsdx::MAX_FILE {
             return Err(operation("compressed file exceeds cap"));
         }
         // The head only words the refusal of a file that is not a ZIP at all (#94).
         let mut head = Vec::new();
         (&mut file).take(misterdiagram_opc::CONTAINER_HEAD as u64).read_to_end(&mut head).map_err(operation)?;
         file.seek(std::io::SeekFrom::Start(0)).map_err(operation)?;
-        let mut archive =
+        let archive =
             zip::ZipArchive::new(file).map_err(|e| operation(misterdiagram_opc::container_error(&head).unwrap_or_else(|| e.to_string())))?;
+        self.read_archive(archive, stencil)
+    }
+
+    fn read_archive(&self, mut archive: zip::ZipArchive<std::fs::File>, stencil: bool) -> Result<Document> {
+        use misterdiagram_opc::{MAX_ENTRIES, MAX_PART, MAX_TOTAL};
         if archive.len() > MAX_ENTRIES {
             return Err(operation("too many package entries"));
         }
@@ -160,7 +164,8 @@ impl Session {
         let mut total = held;
         total.raw = total.raw.saturating_add(needed);
         self.check_retention(held, total)?;
-        let document = misterdiagram_vsdx::read_with_open_nodes(path, held.nodes).map_err(|error| admission_error(error, held.nodes))?;
+        let document =
+            misterdiagram_vsdx::import_archive_with_open_nodes(archive, bytes, held.nodes).map_err(|error| admission_error(error, held.nodes))?;
         self.reserve(Some((&document, stencil)))?;
         Ok(document)
     }
@@ -315,6 +320,25 @@ pub(crate) fn retention_error(name: &str, limit: usize, needed: usize, held: usi
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reservation_and_import_use_the_same_open_archive_after_path_replacement() {
+        let root = std::env::temp_dir().join(format!("misterdiagram-open-archive-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("drawing.vsdx");
+        let mut original = crate::files::blank_document(false);
+        original.pages[0].name = "Original".into();
+        std::fs::write(&path, misterdiagram_vsdx::write(&original).unwrap().bytes).unwrap();
+        let archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        let mut replacement = original;
+        replacement.pages[0].name = "Replacement".into();
+        crate::files::atomic_write(&path, &misterdiagram_vsdx::write(&replacement).unwrap().bytes).unwrap();
+
+        let session = Session::new();
+        assert_eq!(session.read_archive(archive, false).unwrap().pages[0].name, "Original");
+        assert_eq!(session.read_document(&path, false).unwrap().pages[0].name, "Replacement");
+        std::fs::remove_dir_all(root).unwrap();
+    }
     /// https://learn.microsoft.com/en-us/office/vba/api/visio.application.endundoscope
     #[test]
     fn reimport_node_refusal_names_fixed_bound_and_restores_document() {

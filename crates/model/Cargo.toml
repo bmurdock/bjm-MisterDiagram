@@ -13,7 +13,7 @@ misterdiagram-geom.workspace = true
 misterdiagram-color.workspace = true
 serde.workspace = true
 uuid.workspace = true
-chrono = { workspace = true, features = ["wasmbind"] }
+jiff.workspace = true
 
 [dev-dependencies]
 misterdiagram-opc.workspace = true

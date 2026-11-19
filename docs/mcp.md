@@ -196,6 +196,12 @@ publishing session changes, so oversized command and batch results roll back
 in-memory state. Files already written remain external side effects. The engine
 reserves 64 bytes for the transport envelope inside the same 1 MiB allowance.
 
+Legacy JSON-RPC arrays reserve reply space before dispatch. Each non-ping
+request reserves up to 1 MiB plus framing and its request ID. If the reservation
+exceeds the 4 MiB frame, the server rejects the array before executing any
+request. Split the array or use the `batch` tool for an atomic sequence of engine
+commands.
+
 Resources `misterdiagram://document` and `misterdiagram://commands` return these
 same engine queries. The Python example and real stdio regression are runnable:
 
@@ -261,8 +267,6 @@ Fresh Visio keeps its routes and passes the unchanged render ceilings and
 unrepaired package gate under the narrow [route-geometry ruling](file-format-parity.md#ruling-router-owned-connector-geometry-charles-2026-10-17).
 Both human visual verdicts remain pending.
 Rows whose formula-driven bounds change when moved are rejected transactionally.
-Legacy JSON-RPC arrays share the 4 MiB response cap; oversized replies return an
-error without emitting an oversized frame. This is separate from the `batch` tool.
 
 The compiled network library opens with `stencil.open {"builtin":"network"}`.
 Search it with `stencil_search`; `drop_master` and `master.drop` accept semantic
@@ -391,7 +395,10 @@ batch as a separate operation.
 
 `file.new` and `open`/`file.open` refuse to replace a document with unsaved edits.
 The error tells callers to pass `discard: true` when replacement is intentional.
-A fresh session is clean; save marks the current revision clean. Undo and redo
+A fresh session is clean. Saving a complete document marks its revision clean.
+Saving a drawing as a `.vssx` stencil copy leaves its drawing path and unsaved
+status intact. If the copy replaces the open drawing itself, the drawing is
+marked unsaved. Undo and redo
 track the saved revision, and inspection, previews and external stencil loading
 do not mark the drawing dirty. The guard state lives only in the session and is
 never written into the document.

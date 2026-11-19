@@ -61,7 +61,7 @@ fn generated_svg_resvg_and_pdf_text() {
         std::fs::create_dir_all(&dest).unwrap();
         for file in std::fs::read_dir(&group).unwrap() {
             let file = file.unwrap().path();
-            if !file.extension().is_some_and(|e| e == "vsdx") {
+            if file.extension().is_none_or(|e| e != "vsdx") {
                 continue;
             }
             let doc = misterdiagram_vsdx::read(&file).unwrap();

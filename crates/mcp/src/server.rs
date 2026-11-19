@@ -6,7 +6,7 @@ const MAX_MESSAGE: u64 = 4 * 1024 * 1024;
 use serde_json::{Value, json};
 
 use crate::backend::Backend;
-use crate::tools::{call_tool, tool_definitions};
+use crate::tools::{TOOL_RESULT_BYTES, call_tool, tool_definitions};
 
 /// The MCP revision we implement.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -42,19 +42,40 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
 fn response_limit() -> String {
     error(Value::Null, INTERNAL_ERROR, "MCP response exceeds cap").to_string()
 }
-struct ReplyBuffer(Vec<u8>);
+const MAX_REPLY: usize = MAX_MESSAGE as usize - 1;
+struct ReplyBuffer {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+impl ReplyBuffer {
+    fn new(limit: usize) -> Self {
+        Self { bytes: Vec::new(), limit }
+    }
+}
 impl Write for ReplyBuffer {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         // Reserve one byte for the newline framing emitted by serve.
-        if self.0.len().saturating_add(bytes.len()) >= MAX_MESSAGE as usize {
+        if self.bytes.len().saturating_add(bytes.len()) > self.limit {
             return Err(std::io::Error::other("MCP response exceeds cap"));
         }
-        self.0.extend_from_slice(bytes);
+        self.bytes.extend_from_slice(bytes);
         Ok(bytes.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+fn batch_reply_limit(message: &Value) -> usize {
+    let method = message.get("method").and_then(Value::as_str);
+    let id = message.get("id");
+    if method.is_some() && id.is_none() {
+        return 0;
+    }
+    // Non-ping replies reserve a full tool result. The remaining space covers
+    // the JSON-RPC wrapper and the actual escaped request ID.
+    let payload = if method == Some("ping") { 0 } else { TOOL_RESULT_BYTES };
+    payload + 128 + id.map_or(4, |id| id.to_string().len())
 }
 
 impl Server {
@@ -138,44 +159,59 @@ impl Server {
             return None;
         }
         match serde_json::from_str::<Value>(line) {
-            Ok(Value::Array(batch)) => {
-                // Legacy JSON-RPC batches share the same whole-message response cap.
-                if batch.is_empty() {
-                    return Some(error(Value::Null, INVALID_REQUEST, "empty batch").to_string());
-                }
-                let mut replies = ReplyBuffer(Vec::new());
-                if replies.write_all(b"[").is_err() {
-                    return Some(response_limit());
-                }
-                let mut count = 0usize;
-                for message in batch {
-                    if let Some(reply) = self.handle(message) {
-                        if count > 0 && replies.write_all(b",").is_err() {
-                            return Some(response_limit());
-                        }
-                        if serde_json::to_writer(&mut replies, &reply).is_err() {
-                            return Some(response_limit());
-                        }
-                        count += 1;
-                    }
-                }
-                if count == 0 {
-                    return None;
-                }
-                if replies.write_all(b"]").is_err() {
-                    return Some(response_limit());
-                }
-                Some(String::from_utf8(replies.0).unwrap_or_else(|_| response_limit()))
-            }
+            Ok(Value::Array(batch)) => self.handle_batch(batch),
             Ok(msg) => self.handle(msg).map(|reply| {
-                let mut bytes = ReplyBuffer(Vec::new());
+                let mut bytes = ReplyBuffer::new(MAX_REPLY);
                 if serde_json::to_writer(&mut bytes, &reply).is_err() {
                     return response_limit();
                 }
-                String::from_utf8(bytes.0).unwrap_or_else(|_| response_limit())
+                String::from_utf8(bytes.bytes).unwrap_or_else(|_| response_limit())
             }),
             Err(e) => Some(error(Value::Null, PARSE_ERROR, format!("parse error: {e}")).to_string()),
         }
+    }
+
+    fn handle_batch(&mut self, batch: Vec<Value>) -> Option<String> {
+        if batch.is_empty() {
+            return Some(error(Value::Null, INVALID_REQUEST, "empty batch").to_string());
+        }
+        let mut remaining = MAX_REPLY - 2;
+        for message in &batch {
+            let limit = batch_reply_limit(message);
+            if limit == 0 {
+                continue;
+            }
+            let Some(left) = remaining.checked_sub(limit + 1) else {
+                return Some(error(Value::Null, INVALID_REQUEST, "MCP response exceeds cap: split the batch; no requests ran").to_string());
+            };
+            remaining = left;
+        }
+
+        let mut replies = ReplyBuffer::new(MAX_REPLY);
+        replies.bytes.push(b'[');
+        for message in batch {
+            let limit = batch_reply_limit(&message);
+            let Some(reply) = self.handle(message) else { continue };
+            if replies.bytes.len() > 1 {
+                replies.bytes.push(b',');
+            }
+            let start = replies.bytes.len();
+            replies.limit = start + limit;
+            if serde_json::to_writer(&mut replies, &reply).is_err() {
+                replies.bytes.truncate(start);
+                // Tool results are bounded before they reach this frame. A
+                // larger custom read response still gets a correlated reply.
+                let id = reply.get("id").cloned().unwrap_or(Value::Null);
+                if serde_json::to_writer(&mut replies, &error(id, INTERNAL_ERROR, "MCP response exceeds cap")).is_err() {
+                    return Some(response_limit());
+                }
+            }
+        }
+        if replies.bytes.len() == 1 {
+            return None;
+        }
+        replies.bytes.push(b']');
+        Some(String::from_utf8(replies.bytes).unwrap_or_else(|_| response_limit()))
     }
 
     /// Handle one JSON-RPC message; `None` for notifications and responses.
@@ -323,6 +359,27 @@ mod tests {
         let reply = s.handle_line(&request.to_string()).unwrap();
         assert!(reply.len() < MAX_MESSAGE as usize);
         assert!(reply.contains("MCP response exceeds cap"));
+    }
+    #[test]
+    fn rejected_legacy_batch_dispatches_no_edits_and_small_batches_keep_request_ids() {
+        let mut s = Server::new(Box::new(Headless::new()));
+        let drawing = json!({"jsonrpc":"2.0","id":"edit","method":"tools/call","params":{
+            "name":"run_command","arguments":{"command":"shape.draw.rect","params":{"x":1,"y":1,"width":2,"height":1}}
+        }});
+        let reads =
+            (0..200).map(|id| json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"list_commands","arguments":{"detail":"full"}}}));
+        let oversized = std::iter::once(drawing.clone()).chain(reads).collect::<Vec<_>>();
+        let refusal = s.handle_line(&serde_json::to_string(&oversized).unwrap()).unwrap();
+        assert!(refusal.contains("no requests ran"));
+
+        let ping = json!({"jsonrpc":"2.0","id":"ping","method":"ping"});
+        let small: Value = serde_json::from_str(&s.handle_line(&json!([drawing, ping]).to_string()).unwrap()).unwrap();
+        assert_eq!(small[0]["id"], "edit");
+        assert_eq!(small[0]["result"]["isError"], false);
+        let result: Value = serde_json::from_str(small[0]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(result["id"], 1, "the rejected batch must not consume a shape ID");
+        assert_eq!(small[1]["id"], "ping");
+        assert_eq!(small[1]["result"], json!({}));
     }
     #[test]
     fn seventeen_headless_tools() {

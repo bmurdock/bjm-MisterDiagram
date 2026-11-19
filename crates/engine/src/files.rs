@@ -152,6 +152,7 @@ pub(crate) fn save(s: &mut Session, p: &Value) -> Result<Value> {
         "vstx" => SaveKind::Template,
         _ => return Err(operation("save extension must be vsdx, vssx or vstx")),
     };
+    let stencil_projection = kind.projects_stencil(&s.document);
     let theme = misterdiagram_theme::Themes::from_document(&s.document).map_err(operation)?;
     let mut written = misterdiagram_vsdx::write_as_with_hosts(&s.document, kind, Some(&theme), Some(&misterdiagram_text::Host)).map_err(operation)?;
     for ((page, id), limit) in &s.route_warnings {
@@ -167,8 +168,15 @@ pub(crate) fn save(s: &mut Session, p: &Value) -> Result<Value> {
     let saved_generation = s.save_generation.checked_add(1).ok_or_else(|| operation("save generation limit"))?;
     atomic_write(&absolute, &written.bytes)?;
     s.save_generation = saved_generation;
-    s.saved_revision = Some(s.revision);
-    s.path = Some(absolute.canonicalize().unwrap_or(absolute));
+    let saved_path = absolute.canonicalize().unwrap_or(absolute);
+    if !stencil_projection {
+        s.saved_revision = Some(s.revision);
+        s.path = Some(saved_path);
+    } else if s.path.as_ref() == Some(&saved_path) {
+        // An opened drawing may already have a .vssx filename. Its previous
+        // revision is no longer backed by that file if we replace it in place.
+        s.saved_revision = None;
+    }
     Ok(json!({"bytes":written.bytes.len(),"warnings":written.warnings,"warning_count":written.warning_count}))
 }
 /// Export a page through the established renderer. PDF without a page includes
@@ -253,9 +261,24 @@ impl Drop for Temporary {
         let _ = std::fs::remove_file(&self.0);
     }
 }
+fn create_temporary(path: &Path, replacing: bool) -> std::io::Result<std::fs::File> {
+    let mut open = std::fs::OpenOptions::new();
+    open.write(true).create_new(true);
+    // A replacement can be more private than the process's default creation mode.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        open.mode(if replacing { 0o600 } else { 0o666 });
+    }
+    #[cfg(not(unix))]
+    let _ = replacing;
+    open.open(path)
+}
 /// Publish fully encoded bytes through a sibling temporary file, sync and rename.
-/// Existing destination permissions are preserved; new files use the process's normal
-/// creation permissions. A destination symlink is replaced, leaving its target untouched.
+/// On Unix, replacement temporaries start owner-only. The replacement copies the
+/// destination's Unix mode bits or Windows read-only attribute. ACLs follow the
+/// filesystem's creation rules. New files use the process's normal creation mode.
+/// A destination symlink is replaced, leaving its target untouched.
 /// A failure before rename leaves the destination intact and removes the temporary file.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -271,9 +294,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     for _ in 0..16 {
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temp = parent.join(format!(".misterdiagram-{}-{n}.tmp", std::process::id()));
-        let mut open = std::fs::OpenOptions::new();
-        open.write(true).create_new(true);
-        let mut file = match open.open(&temp) {
+        let mut file = match create_temporary(&temp, permissions.is_some()) {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(operation(e)),
@@ -289,4 +310,25 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         return Ok(());
     }
     Err(operation("could not reserve an output temporary file"))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn replacement_temporary_is_private_from_creation_and_published_mode_is_preserved() {
+        let root = std::env::temp_dir().join(format!("misterdiagram-output-permissions-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("drawing.vsdx");
+        let file = create_temporary(&path, true).unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o077, 0);
+        file.set_permissions(std::fs::Permissions::from_mode(0o640)).unwrap();
+        drop(file);
+        atomic_write(&path, b"replacement").unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
