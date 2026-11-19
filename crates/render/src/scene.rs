@@ -628,27 +628,41 @@ pub fn page(document: &Document, index: usize, options: Options) -> Result<Scene
 }
 /// Share a retained-scene allocation budget across pages of one export.
 pub fn page_budgeted(document: &Document, index: usize, options: Options, budget: &mut SceneBudget) -> Result<Scene, String> {
+    with_page_evaluator(document, options, |evaluator| page_prepared_budgeted(evaluator, index, options, budget))
+}
+
+#[cfg(test)]
+thread_local! {
+    static PAGE_EVALUATORS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn with_page_evaluator<T>(document: &Document, options: Options, render: impl FnOnce(&mut Evaluator<'_>) -> Result<T, String>) -> Result<T, String> {
     let themes = misterdiagram_theme::Themes::from_document(document).map_err(|e| e.to_string())?;
     let host = misterdiagram_text::Host;
     let evaluator = Evaluator::new(document).map_err(|e| e.to_string())?.with_theme_host(&themes).with_text_host(&host);
     let mut evaluator = if options.cached_fallback { evaluator.with_cached_fallback() } else { evaluator };
-    page_prepared_budgeted(&mut evaluator, index, options, budget)
+    #[cfg(test)]
+    PAGE_EVALUATORS.with(|count| count.set(count.get() + 1));
+    render(&mut evaluator)
 }
 
 /// Compose foreground PDF pages with one retained-scene budget and a bounded page count.
 /// https://learn.microsoft.com/en-us/office/vba/api/visio.document.exportasfixedformat
 pub fn foreground_pages_budgeted(document: &Document, options: Options, budget: &mut SceneBudget) -> Result<Vec<Scene>, String> {
-    let foreground = |p: &&misterdiagram_model::Page| !p.attributes.get("Background").is_some_and(|s| s == "1" || s == "true");
-    if document.pages.iter().filter(foreground).take(4097).count() > 4096 {
+    Ok(foreground_evaluated(document, options, budget, false)?.into_iter().map(|page| page.scene).collect())
+}
+
+fn foreground_evaluated(document: &Document, options: Options, budget: &mut SceneBudget, retain: bool) -> Result<Vec<EvaluatedPage>, String> {
+    let indices: Vec<_> = document.pages.iter().enumerate().filter(|(_, page)| !page.is_background()).take(4097).map(|(i, _)| i).collect();
+    if indices.len() > 4096 {
         return Err("export page limit".into());
     }
-    let mut scenes = Vec::new();
-    for (index, page) in document.pages.iter().enumerate() {
-        if foreground(&page) {
-            scenes.push(page_budgeted(document, index, options, budget)?);
-        }
+    if indices.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(scenes)
+    with_page_evaluator(document, options, |evaluator| {
+        indices.into_iter().map(|index| page_evaluated_prepared(evaluator, index, options, budget, retain)).collect()
+    })
 }
 /// Cells the evaluator could not compute and filled from the file's saved values.
 fn fallback_warnings(evaluator: &mut Evaluator<'_>, scene: &mut Scene) {
@@ -1896,5 +1910,33 @@ mod relationship_tests {
         let mut extension_only = rel;
         extension_only.attributes.remove("r:id");
         assert_eq!(super::foreign_relationship(&extension_only), None);
+    }
+}
+
+#[cfg(test)]
+mod page_evaluator_tests {
+    use super::*;
+    use misterdiagram_model::skeleton;
+
+    #[test]
+    fn foreground_exports_share_one_index_and_keep_independent_page_results() {
+        let mut doc = skeleton::document(false);
+        let mut background = skeleton::page(1, "Background", false);
+        background.attributes.insert("Background".into(), "1".into());
+        doc.pages.push(background);
+        doc.pages.push(skeleton::page(2, "Second foreground", true));
+        let options = Options { page_canvas: true, ..Default::default() };
+        let expected = [0, 2].map(|index| page(&doc, index, options).unwrap().page_size);
+        assert_ne!(expected[0], expected[1]);
+
+        PAGE_EVALUATORS.with(|count| count.set(0));
+        let pdf = foreground_pages_budgeted(&doc, options, &mut SceneBudget::default()).unwrap();
+        PAGE_EVALUATORS.with(|count| assert_eq!(count.get(), 1));
+        assert_eq!(pdf.iter().map(|page| page.page_size).collect::<Vec<_>>(), expected);
+
+        PAGE_EVALUATORS.with(|count| count.set(0));
+        let pptx = evaluated::foreground_pages(&doc, options, &mut SceneBudget::default()).unwrap();
+        PAGE_EVALUATORS.with(|count| assert_eq!(count.get(), 1));
+        assert_eq!(pptx.iter().map(|page| page.scene.page_size).collect::<Vec<_>>(), expected);
     }
 }
