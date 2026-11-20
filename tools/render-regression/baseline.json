@@ -1,0 +1,145 @@
+{
+  "source_commit": "510822872b7a72f43b0b01903a4f31bb2f057532",
+  "source_tree": "e250689f526c1d27dbdd0f454171e40026288786",
+  "build_platform": "aarch64-apple-darwin",
+  "build_ci_run": "https://github.com/bmurdock/bjm-MisterDiagram/actions/runs/44632987024",
+  "build_artifact_sha256": "19c83f350981357c998a48685ff22dcb41a225fdc031984147f5dba9a990fea8",
+  "independent_visio_comparison": false,
+  "exports_reproduced_byte_for_byte": 8,
+  "exports": {
+    "office-network/page-1.svg": {
+      "view_box": "0 0 936 792",
+      "font_families": [
+        "'Calibri', 'Carlito'"
+      ]
+    },
+    "office-network/page-1.png": {
+      "pixels": [
+        1155,
+        963
+      ],
+      "rgba_sha256": "521c77905b0d7d64501c98b10750fb5554abf2d15109e2d588068d76670aa1b6"
+    },
+    "office-network/document.pdf": {
+      "pages_pt": [
+        [
+          "936",
+          "792"
+        ]
+      ]
+    },
+    "multipage/page-1.svg": {
+      "view_box": "0 0 504 288",
+      "font_families": [
+        "'Calibri', 'Carlito'"
+      ]
+    },
+    "multipage/page-2.svg": {
+      "view_box": "0 0 360 432",
+      "font_families": [
+        "'Calibri', 'Carlito'",
+        "'Cambria', 'Caladea'",
+        "'Courier New', 'Cousine'"
+      ]
+    },
+    "multipage/page-1.png": {
+      "pixels": [
+        539,
+        289
+      ],
+      "rgba_sha256": "a735516fa491125ef54d73d73c1bce41b6edc7c56556ea6d8e2ec819fd75fff0"
+    },
+    "multipage/page-2.png": {
+      "pixels": [
+        424,
+        467
+      ],
+      "rgba_sha256": "f6b8d150c296ac6af123e91b62c066a5f458d1f3751707e2dc9e82aed923b260"
+    },
+    "multipage/document.pdf": {
+      "pages_pt": [
+        [
+          "504",
+          "288"
+        ],
+        [
+          "360",
+          "432"
+        ]
+      ]
+    }
+  },
+  "verified": {
+    "office-network": {
+      "pdf_pages_pt": [
+        [
+          "936",
+          "792"
+        ]
+      ],
+      "pdf_embedded_fonts_with_unicode_mapping": [
+        "Carlito-Regular"
+      ],
+      "pdf_text_checks_by_page": [
+        [
+          "Sky Internet",
+          "Alder Firewall",
+          "Juniper PC"
+        ]
+      ]
+    },
+    "multipage": {
+      "pdf_pages_pt": [
+        [
+          "504",
+          "288"
+        ],
+        [
+          "360",
+          "432"
+        ]
+      ],
+      "pdf_embedded_fonts_with_unicode_mapping": [
+        "Carlito-Regular",
+        "Carlito-Bold",
+        "Caladea-Italic",
+        "Cousine-Regular"
+      ],
+      "pdf_text_checks_by_page": [
+        [
+          "Café dispatch",
+          "Field operations"
+        ],
+        [
+          "Shift handover",
+          "Révision 02",
+          "Review 14:30",
+          "Field operations"
+        ]
+      ]
+    }
+  },
+  "sha256": {
+    "README.md": "3fc5748f0f5160aabe260a2ba30907fa3999e004bfadf8c18126d64fb0b97619",
+    "multipage/commands.json": "02734872f185c598fdfc6f23ce6d0de52e840d76e8eb7bdb904f9f86bc98ab45",
+    "multipage/document.pdf": "4d9fa77d4dfa75a414384b20a0352814aab1e43a0547b4d8cbf205efad20d721",
+    "multipage/multipage.vsdx": "6347d70e566456c9df7022a90099b8da74ef759bae8449bf787b3e7a2b35bd8a",
+    "multipage/page-1.png": "a0de741a31dfd0b43337f4ab3bf76554cb29281eb2a7bd7feb772d79facc33c5",
+    "multipage/page-1.svg": "5b06e92b17507bd6774723634c3441e975d7b96207643bdf079d51454f095c3c",
+    "multipage/page-2.png": "6f271e3539e34f5ec42bd5871684105e152089c9f53777ea6adbebeac2406266",
+    "multipage/page-2.svg": "dcb7609b45603ad6c490ed99b8a3eba68636f0b681f872991053aa940e69214e",
+    "multipage/pdf-fonts.txt": "61f1809111f489066437d6002297d4da834e89bddbfb111596b28114100bb822",
+    "multipage/pdf-info.txt": "0da5d757f9a725729a50e2681e128d6c1b3523db7657493131e6aad034a372ee",
+    "multipage/pdf-page-1.png": "2456ffcc250106d1e20ba4aeafbf81e1f2181e2f4ed8c11aa18f2b9d5b72f815",
+    "multipage/pdf-page-2.png": "85ce60bc2223950c4050f86f2b617bd0eaa55fc7beb71e40f3ca5201ce968beb",
+    "multipage/pdf-text.txt": "5a144cb477bf3a8e6f5ea1530756fa856954cd3d266af5ad092bad897babfefb",
+    "office-network/document.pdf": "768c9df2aabe96100f40cb04f216ff9fcddd46e465964f332026b49bb6c4f98d",
+    "office-network/office-network.vsdx": "ba95b4a21af1211833f4bd8a59b8a75e84801b0db05ef0476cf7ab8616823c64",
+    "office-network/page-1.png": "86599594c1dd12ecda2a0980c256c68973b60eeb557e34aa4cdbbeb8cf3771cf",
+    "office-network/page-1.svg": "84adc4ec26d531738d0ff068769c12cd7d4fed64ae926a777f8f46767c3cb6e5",
+    "office-network/pdf-fonts.txt": "000c9a1a01e027dcc2ab4fea1e8dc1156ce5cbff41d3fe910857e642b455164b",
+    "office-network/pdf-info.txt": "2a935b6d07d77c1197e27c2578e2a810ab51e0c491c641dff8033c41f8b47bb5",
+    "office-network/pdf-page-1.png": "fdaee9556d9881bcf88138c2f5136ba43bd131ebc687a7c9da39601a886279cf",
+    "office-network/pdf-text.txt": "6a5ca2424d4f6b6e73b5c59ef18b6577a33346d3501e9f33dcacb0fdc18045be"
+  }
+}

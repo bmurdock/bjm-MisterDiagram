@@ -1,0 +1,211 @@
+{
+  "commands": [
+    {
+      "command": "page.rename",
+      "params": {
+        "page": 1,
+        "name": "Dispatch overview"
+      }
+    },
+    {
+      "command": "page.size",
+      "params": {
+        "page": 1,
+        "width": 7,
+        "height": 4
+      }
+    },
+    {
+      "command": "page.add",
+      "params": {
+        "name": "Shift handover"
+      }
+    },
+    {
+      "command": "page.size",
+      "params": {
+        "page": 2,
+        "width": 5,
+        "height": 6
+      }
+    },
+    {
+      "command": "page.add",
+      "params": {
+        "name": "Common background"
+      }
+    },
+    {
+      "command": "page.size",
+      "params": {
+        "page": 3,
+        "width": 7,
+        "height": 4
+      }
+    },
+    {
+      "command": "shape.draw.rect",
+      "params": {
+        "page": 3,
+        "x": 0.3,
+        "y": 0.55,
+        "width": 4.4,
+        "height": 0.5,
+        "text": "Field operations",
+        "fill": {
+          "color": "#DBEAFE"
+        },
+        "line": {
+          "color": "#1D4ED8"
+        },
+        "font": {
+          "font": "Carlito",
+          "size": 14
+        }
+      }
+    },
+    {
+      "command": "page.background",
+      "params": {
+        "page": 1,
+        "background": 3
+      }
+    },
+    {
+      "command": "page.background",
+      "params": {
+        "page": 2,
+        "background": 3
+      }
+    },
+    {
+      "command": "shape.draw.rect",
+      "params": {
+        "page": 1,
+        "x": 1.1,
+        "y": 2.55,
+        "width": 4.8,
+        "height": 1.0,
+        "text": "Café dispatch",
+        "fill": {
+          "color": "#DCFCE7"
+        },
+        "line": {
+          "color": "#166534"
+        },
+        "font": {
+          "font": "Carlito",
+          "size": 22,
+          "bold": true
+        }
+      }
+    },
+    {
+      "command": "shape.draw.rect",
+      "params": {
+        "page": 1,
+        "x": 1.1,
+        "y": 1.65,
+        "width": 4.8,
+        "height": 0.42,
+        "fill": {
+          "color": "#93C5FD",
+          "pattern": 2
+        },
+        "line": {
+          "color": "#1E3A8A"
+        }
+      }
+    },
+    {
+      "command": "shape.draw.rect",
+      "params": {
+        "page": 2,
+        "x": 0.4,
+        "y": 4.2,
+        "width": 4.2,
+        "height": 1.2,
+        "text": "Shift handover\nRévision 02",
+        "fill": {
+          "color": "#FEF3C7"
+        },
+        "line": {
+          "color": "#B45309"
+        },
+        "font": {
+          "font": "Caladea",
+          "size": 21,
+          "italic": true
+        }
+      }
+    },
+    {
+      "command": "shape.draw.rect",
+      "params": {
+        "page": 2,
+        "x": 0.7,
+        "y": 2.65,
+        "width": 3.55,
+        "height": 0.5,
+        "text": "Review 14:30",
+        "fill": {
+          "color": "#F1F5F9"
+        },
+        "line": {
+          "color": "#475569"
+        },
+        "font": {
+          "font": "Cousine",
+          "size": 14
+        }
+      }
+    },
+    {
+      "command": "shape.text",
+      "params": {
+        "page": 2,
+        "id": 1,
+        "paragraphs": [
+          {
+            "runs": [
+              {
+                "text": "Shift handover",
+                "font": "Cambria",
+                "size": 21,
+                "italic": true
+              }
+            ]
+          },
+          {
+            "runs": [
+              {
+                "text": "Révision 02",
+                "font": "Cambria",
+                "size": 21,
+                "italic": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "command": "shape.text",
+      "params": {
+        "page": 2,
+        "id": 2,
+        "paragraphs": [
+          {
+            "runs": [
+              {
+                "text": "Review 14:30",
+                "font": "Courier New",
+                "size": 14
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
