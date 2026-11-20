@@ -1,0 +1,6 @@
+name                                 type              encoding         emb sub uni object ID
+------------------------------------ ----------------- ---------------- --- --- --- ---------
+TFCCSX+Carlito-Regular               CID TrueType      Identity-H       yes yes yes      4  0
+XSOBLR+Carlito-Bold                  CID TrueType      Identity-H       yes yes yes      7  0
+GBFUOQ+Caladea-Italic                CID TrueType      Identity-H       yes yes yes     10  0
+XBGSBP+Cousine-Regular               CID TrueType      Identity-H       yes yes yes     13  0
