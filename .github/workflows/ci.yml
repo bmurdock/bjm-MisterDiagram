@@ -73,7 +73,15 @@ jobs:
           MISTERDIAGRAM_TEST_INJECTIONS: '1'
         run: python3 tools/mcp/test_recovery.py
       - name: Build test binary
+        env:
+          CRAFT_FONTS_DIR: ''
         run: cargo build --release -p misterdiagram-cli
+      - name: Compare rendering fixtures
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-pil poppler-utils
+          /usr/bin/python3 tools/render-regression/check.py --cli target/release/misterdiagram
       - name: MCP large-stencil stdio regressions
         env:
           MISTERDIAGRAM_CLI: target/release/misterdiagram${{ runner.os == 'Windows' && '.exe' || '' }}

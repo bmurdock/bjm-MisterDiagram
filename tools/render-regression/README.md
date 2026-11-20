@@ -9,9 +9,30 @@ Captured from the macOS arm64 GitHub Actions build of commit `510822872b7a72f43b
 
 The VSDX files are the inputs for reruns. Both folders include the PDF, its rendered pages at 72 dpi, and the extracted text and font inventory. PNG uses the CLI's native preview canvas. SVG and PDF use the physical page canvas. `baseline.json` records checksums, dimensions, SVG font families, and PDF verification details. All eight primary exports reproduced byte for byte from the saved inputs on the same build.
 
-## Reproduce on a candidate build
+## Check a candidate build
 
-Run these from this directory with a candidate `misterdiagram` binary on `PATH` and a clean output directory. Compare the outputs with the matching reference files and use the PDF text, fonts, and rasterized pages to investigate any changes.
+Use Python 3.11+, Pillow 10+, and Poppler's `pdfinfo`, `pdffonts`, `pdftotext`, and `pdftoppm` on PATH. From the repository root, build with the same bundled fonts used for the baseline and run the comparison. The Linux CI job runs this check against its release binary.
+
+```sh
+CRAFT_FONTS_DIR='' cargo build --locked --release -p misterdiagram-cli
+python3 tools/render-regression/check.py --cli target/release/misterdiagram
+```
+
+| Acceptance criterion | Evidence |
+| --- | --- |
+| Determinism | The original build reproduced all eight primary exports byte for byte. Add `--strict-bytes` to check exact bytes against that capture on a controlled platform. |
+| Regression stability | The runner compares PNG dimensions and decoded RGBA pixels, SVG element order, attributes and text, and PDF page counts, dimensions, per-page text, font names, embedding, subsetting, and Unicode mappings. It also compares each PDF page at 72 dpi using the same Poppler installation for both files. |
+| Visio compatibility | Independent comparison in licensed Visio is pending. The private oracle and its acceptance criteria are described in [development.md](../../docs/development.md). |
+
+The runner checks the recorded reference hashes before rendering into a temporary directory. A difference reports the fixture, export, and failed property and exits with a failure. For an intentional rendering change, capture the affected outputs separately and submit the reference files, updated manifest entries, and a before/after explanation together for review. Hashes identify the captured files. Build provenance and reproducibility require separate evidence.
+
+## Font resolution in previews
+
+The SVGs declare the requested family first, for example `'Calibri', 'Carlito'`. A browser can select an installed Calibri, while the fixture PDF embeds Carlito. The SVG comparison checks the declaration. For visual verification in the future Mac editor, use the engine-rendered PNG with bundled fonts, or explicitly map the SVG families to the same bundled faces before using the browser preview to judge text layout.
+
+## Reproduce an individual export
+
+To inspect a difference, run the corresponding command from this directory with the candidate binary on PATH and a fresh output directory.
 
 ```bash
 mkdir -p candidate/office-network candidate/multipage
@@ -24,5 +45,3 @@ for page in 1 2; do
   misterdiagram render multipage/multipage.vsdx --page "$page" "candidate/multipage/page-$page.svg"
 done
 ```
-
-A hash mismatch signals a change for review. Compare decoded PNG pixels, SVG dimensions and text, and PDF page images and extracted text before attributing it to rendering.

@@ -120,7 +120,7 @@
     }
   },
   "sha256": {
-    "README.md": "3fc5748f0f5160aabe260a2ba30907fa3999e004bfadf8c18126d64fb0b97619",
+    "README.md": "eb7f44bab58f8baf9613a37d6cdfc2bd96d1f22cb78ced5be7365af1912e84ee",
     "multipage/commands.json": "02734872f185c598fdfc6f23ce6d0de52e840d76e8eb7bdb904f9f86bc98ab45",
     "multipage/document.pdf": "4d9fa77d4dfa75a414384b20a0352814aab1e43a0547b4d8cbf205efad20d721",
     "multipage/multipage.vsdx": "6347d70e566456c9df7022a90099b8da74ef759bae8449bf787b3e7a2b35bd8a",
